@@ -3,6 +3,7 @@ package com.scheduler.scheduler.controller;
 import com.scheduler.scheduler.dto.ScheduledJobDefinitionDto;
 import com.scheduler.scheduler.mapper.ScheduledJobDefinitionMapper;
 import com.scheduler.scheduler.service.ScheduleService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,7 +28,7 @@ public class SchedulerController {
     }
 
     @PostMapping
-    public ScheduledJobDefinitionDto upsert(ScheduledJobDefinitionDto scheduledJobDefinitionDto) {
+    public ScheduledJobDefinitionDto upsert(@RequestBody @Valid ScheduledJobDefinitionDto scheduledJobDefinitionDto) {
         return scheduledJobDefinitionMapper.toDto(scheduleService.save(scheduledJobDefinitionMapper.toEntity(scheduledJobDefinitionDto)));
     }
 }

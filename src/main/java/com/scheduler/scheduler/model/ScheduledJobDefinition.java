@@ -2,6 +2,7 @@ package com.scheduler.scheduler.model;
 
 import jakarta.persistence.*;
 import lombok.Data;
+
 import java.sql.Timestamp;
 
 @Entity
@@ -20,16 +21,16 @@ public class ScheduledJobDefinition {
     private String jobName;
 
     @Column(nullable = false)
-    private Boolean active;
+    private Boolean active = true;
 
     @Column(nullable = false)
-    private Boolean scheduled;
+    private Boolean scheduled = false;
 
     @Column(nullable = false)
-    private Boolean logStartStopToDb;
+    private Boolean logStartStopToDb = false;
 
     @Column(nullable = false)
-    private Boolean logStartStopToLog;
+    private Boolean logStartStopToLog = false;
 
     @Column(nullable = false, length = 64)
     private String cronExpression;
