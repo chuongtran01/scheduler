@@ -1,0 +1,4 @@
+databaseChangeLog:
+  - include:
+      file: "db/scheduled_job_definition.sql"
+      relativeToChangeLogFile: true

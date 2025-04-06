@@ -1,0 +1,30 @@
+jdbc:
+  dbname: scheduler
+  host: localhost
+  dbPort: 3306
+  password: password
+  username: root
+
+spring:
+  application:
+    name: scheduler
+
+  datasource:
+    url: jdbc:mysql://${jdbc.host}:${jdbc.dbPort}/${jdbc.dbname}?autoReconnect=true&useSSL=true
+    username: ${jdbc.username}
+    password: ${jdbc.password}
+    validationQuery: SELECT 1
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    jpa:
+      hibernate:
+        ddl-auto: update  # Automatically updates the schema; change to validate, create, or none as needed
+      show-sql: true       # Enables SQL logging in the console
+      properties:
+        hibernate:
+          dialect: org.hibernate.dialect.MySQL8Dialect
+
+  liquibase:
+    enabled: true
+    change-log: "classpath:db.changelog-master.yaml"
+    database-change-log-table: databasechangelog
+    database-change-log-lock-table: databasechangeloglock
