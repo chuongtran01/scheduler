@@ -5,6 +5,8 @@ import com.scheduler.scheduler.repository.ScheduledJobDefinitionRepository;
 import com.scheduler.scheduler.scheduled.RunnableJob;
 import jakarta.annotation.PostConstruct;
 import jakarta.transaction.Transactional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.scheduling.TaskScheduler;
@@ -12,6 +14,8 @@ import org.springframework.scheduling.support.CronTrigger;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -22,6 +26,8 @@ import java.util.stream.Collectors;
 
 @Service
 public class SchedulerManagerServiceImpl implements SchedulerManager {
+    private static final Logger logger = LoggerFactory.getLogger(SchedulerManagerServiceImpl.class);
+
     private final List<RunnableJob> availableJobs;
     private final TaskScheduler taskScheduler;
     private final ApplicationContext context;
@@ -29,6 +35,8 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
     private final ScheduledJobDefinitionRepository scheduledJobDefinitionRepository;
 
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
+
+    private final Map<String, Boolean> jobRunningStatus = new ConcurrentHashMap<>();
 
 
     public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository) {
@@ -38,42 +46,38 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         this.scheduledJobDefinitionRepository = scheduledJobDefinitionRepository;
     }
 
-
     @PostConstruct
     @Override
     public void scheduleJobs() {
-        Map<String, RunnableJob> jobBeans = context.getBeansOfType(RunnableJob.class);
-        Map<String, RunnableJob> classNameToBean = jobBeans.values().stream()
-                .collect(Collectors.toMap(job -> job.getClass().getSimpleName(), Function.identity()));
+        Map<String, RunnableJob> classNameToBean = availableJobs.stream().collect(Collectors.toMap(job -> job.getClass().getSimpleName(), Function.identity()));
 
         List<ScheduledJobDefinition> jobs = findActiveScheduledJobs();
 
-        for (ScheduledJobDefinition job : jobs) {
-            String className = job.getJobName(); // e.g. "EmailReportJob"
+        logger.info(String.format("Total jobs: %d", jobs.size()));
 
-            RunnableJob jobBean = classNameToBean.get(className);
+        for (ScheduledJobDefinition job : jobs) {
+            RunnableJob jobBean = classNameToBean.get(job.getJobName());
             if (jobBean == null) {
-                System.err.println("No matching job class found for: " + className);
+                logger.error("No matching job class found for: " + job.getJobName());
                 continue;
             }
 
-            Runnable task = jobBean::run;
+            Runnable task = this.wrapWithStatus(job, jobBean);
+
             CronTrigger trigger = new CronTrigger(job.getCronExpression());
 
             ScheduledFuture<?> future = taskScheduler.schedule(task, trigger);
-            scheduledTasks.put(className, future);
+            scheduledTasks.put(job.getJobName(), future);
         }
     }
 
     @Override
-    public void rescheduleJob(int id, String newCron) {
-        ScheduledJobDefinition scheduledJob = findById(id);
-
+    @Transactional
+    public void rescheduleJob(ScheduledJobDefinition scheduledJob, String newCron) {
         scheduledJob.setCronExpression(newCron);
         scheduledJob.setActive(true);
-        save(scheduledJob);
 
-        stopJob(scheduledJob.getJobName());
+        ScheduledJobDefinition savedScheduledJob = save(scheduledJob);
 
         RunnableJob jobBean = context.getBeansOfType(RunnableJob.class).values().stream()
                 .filter(bean -> bean.getClass().getSimpleName().equals(scheduledJob.getJobName()))
@@ -82,8 +86,50 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
 
         if (jobBean == null) return;
 
-        ScheduledFuture<?> future = taskScheduler.schedule(jobBean::run, new CronTrigger(newCron));
-        scheduledTasks.put(scheduledJob.getJobName(), future);
+        Runnable task = this.wrapWithStatus(savedScheduledJob, jobBean);
+
+        ScheduledFuture<?> future = taskScheduler.schedule(task, new CronTrigger(newCron));
+        replaceScheduledTask(scheduledJob.getJobName(), future);
+    }
+
+    private Runnable wrapWithStatus(ScheduledJobDefinition scheduledJob, RunnableJob jobBean) {
+        return () -> {
+            String jobName = scheduledJob.getJobName();
+            boolean logToDb = scheduledJob.getLogStartStopToDb();
+            boolean logToLog = scheduledJob.getLogStartStopToLog();
+
+            if (Boolean.TRUE.equals(jobRunningStatus.get(jobName))) {
+                logger.info("Job {} is already running. Skipping...", jobName);
+                return;
+            }
+
+            jobRunningStatus.put(jobName, true);
+            try {
+                if (logToLog) {
+                    logger.info("Running job: {}", jobName);
+                }
+                if (logToDb) {
+                    scheduledJob.setLastStartDate(Timestamp.valueOf(LocalDateTime.now()));
+                }
+
+                jobBean.run();
+
+            } catch (Exception e) {
+                String errorMessage = String.format("Error running job %s: %s", jobName, e.getMessage());
+                logger.error(errorMessage, e);
+                scheduledJob.setErrorMessage(errorMessage);
+            } finally {
+                jobRunningStatus.put(jobName, false);
+
+                if (logToLog) {
+                    logger.info("Finished job: {}", jobName);
+                }
+                if (logToDb) {
+                    scheduledJob.setLastCompletedDate(Timestamp.valueOf(LocalDateTime.now()));
+                }
+                this.save(scheduledJob);
+            }
+        };
     }
 
     @Override
@@ -92,36 +138,33 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
     }
 
     @Override
-    public ScheduledJobDefinition createJob(ScheduledJobDefinition scheduledJobDefinition, boolean isRegistered) {
+    public Set<String> getRunningJobs() {
+        return jobRunningStatus.entrySet().stream()
+                .filter(Map.Entry::getValue)
+                .map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
+    }
+
+    @Override
+    public ScheduledJobDefinition upsertJob(ScheduledJobDefinition scheduledJobDefinition) {
         ScheduledJobDefinition scheduledJob = this.save(scheduledJobDefinition);
 
-        if (isRegistered) {
-            this.rescheduleJob(scheduledJob.getId(), scheduledJob.getCronExpression());
+        if (scheduledJobDefinition.getActive()) {
+            this.rescheduleJob(scheduledJob, scheduledJob.getCronExpression());
+        } else {
+            this.stopJob(scheduledJob.getJobName());
         }
         return scheduledJob;
     }
 
-    private ScheduledJobDefinition save(ScheduledJobDefinition scheduledJobDefinition) {
+    @Override
+    public ScheduledJobDefinition save(ScheduledJobDefinition scheduledJobDefinition) {
         return scheduledJobDefinitionRepository.save(scheduledJobDefinition);
     }
 
     @Override
     public ScheduledJobDefinition findById(int id) {
         return scheduledJobDefinitionRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-    }
-
-    @Override
-    @Transactional
-    public void deactivateJobById(int id) {
-        scheduledJobDefinitionRepository.deactivateJobById(id);
-        ScheduledJobDefinition scheduledJob = scheduledJobDefinitionRepository.findById(id).orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND));
-        stopJob(scheduledJob.getJobName());
-    }
-
-    @Override
-    public void activateJobById(int id) {
-        ScheduledJobDefinition scheduledJob = this.findById(id);
-        this.rescheduleJob(scheduledJob.getId(), scheduledJob.getCronExpression());
     }
 
     @Override
@@ -149,4 +192,10 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
             scheduledTasks.remove(jobName);
         }
     }
+
+    private void replaceScheduledTask(String jobName, ScheduledFuture<?> future) {
+        stopJob(jobName);
+        scheduledTasks.put(jobName, future);
+    }
+
 }

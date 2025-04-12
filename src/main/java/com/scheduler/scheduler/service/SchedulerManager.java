@@ -8,19 +8,19 @@ import java.util.Set;
 public interface SchedulerManager {
     void scheduleJobs();
 
-    void rescheduleJob(int id, String newCron);
+    void rescheduleJob(ScheduledJobDefinition scheduledJob, String newCron);
 
     Set<String> getActiveJobs();
 
-    ScheduledJobDefinition createJob(ScheduledJobDefinition scheduledJobDefinition, boolean isRegistered);
+    Set<String> getRunningJobs();
+
+    ScheduledJobDefinition upsertJob(ScheduledJobDefinition scheduledJobDefinition);
 
     ScheduledJobDefinition findById(int id);
-
-    void deactivateJobById(int id);
-
-    void activateJobById(int id);
 
     void deleteJobById(int id);
 
     List<ScheduledJobDefinition> findAll();
+
+    ScheduledJobDefinition save(ScheduledJobDefinition scheduledJobDefinition);
 }

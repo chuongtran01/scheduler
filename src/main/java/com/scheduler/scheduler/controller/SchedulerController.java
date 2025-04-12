@@ -1,8 +1,7 @@
 package com.scheduler.scheduler.controller;
 
-import com.scheduler.scheduler.dto.CreateScheduledJobDefinitionDto;
-import com.scheduler.scheduler.dto.RescheduleJobDto;
 import com.scheduler.scheduler.dto.ScheduledJobDefinitionDto;
+import com.scheduler.scheduler.dto.UpsertScheduledJobDefinitionDto;
 import com.scheduler.scheduler.mapper.ScheduledJobDefinitionMapper;
 import com.scheduler.scheduler.service.SchedulerManager;
 import jakarta.validation.Valid;
@@ -30,19 +29,9 @@ public class SchedulerController {
         return scheduledJobDefinitionMapper.toScheduledJobDefinitionDto(schedulerManager.findById(id));
     }
 
-    @PostMapping
-    public ScheduledJobDefinitionDto create(@RequestBody @Valid CreateScheduledJobDefinitionDto scheduledJobDefinitionDto) {
-        return scheduledJobDefinitionMapper.toScheduledJobDefinitionDto(schedulerManager.createJob(scheduledJobDefinitionMapper.toScheduledJobDefinition(scheduledJobDefinitionDto), scheduledJobDefinitionDto.isRegistered()));
-    }
-
-    @PostMapping("/deactivate/{id}")
-    public void deactivateJobById(@PathVariable int id) {
-        schedulerManager.deactivateJobById(id);
-    }
-
-    @PostMapping("/activate/{id}")
-    public void activateJobById(@PathVariable int id) {
-        schedulerManager.activateJobById(id);
+    @PatchMapping
+    public ScheduledJobDefinitionDto upsert(@RequestBody @Valid UpsertScheduledJobDefinitionDto scheduledJobDefinitionDto) {
+        return scheduledJobDefinitionMapper.toScheduledJobDefinitionDto(schedulerManager.upsertJob(scheduledJobDefinitionMapper.toScheduledJobDefinition(scheduledJobDefinitionDto)));
     }
 
     @DeleteMapping("/{id}")
@@ -55,8 +44,8 @@ public class SchedulerController {
         return schedulerManager.getActiveJobs();
     }
 
-    @PostMapping("/reschedule")
-    public void rescheduleJobById(@RequestBody @Valid RescheduleJobDto rescheduleJobDto) {
-        schedulerManager.rescheduleJob(rescheduleJobDto.id(), rescheduleJobDto.cronExpression());
+    @GetMapping("/running")
+    public Set<String> getRunningJobs() {
+        return schedulerManager.getRunningJobs();
     }
 }

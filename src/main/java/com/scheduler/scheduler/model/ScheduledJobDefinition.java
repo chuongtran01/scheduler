@@ -15,7 +15,6 @@ import java.sql.Timestamp;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ScheduledJobDefinition {
-
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private int id;
