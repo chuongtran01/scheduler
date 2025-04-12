@@ -45,7 +45,7 @@ public class SchedulerController {
         schedulerManager.activateJobById(id);
     }
 
-    @DeleteMapping("/delete/{id}")
+    @DeleteMapping("/{id}")
     public void deleteJobById(@PathVariable int id) {
         schedulerManager.deleteJobById(id);
     }
