@@ -5,10 +5,8 @@
 
 CREATE TABLE scheduled_job_definition (
     id                      INT AUTO_INCREMENT PRIMARY KEY,
-    environment             VARCHAR(64) NOT NULL,
-    job_name                VARCHAR(64) NOT NULL,
+    job_name                VARCHAR(64) NOT NULL UNIQUE,
     active                  TINYINT(1) DEFAULT 1,
-    scheduled               TINYINT(1) DEFAULT 0,
     log_start_stop_to_db    TINYINT(1) DEFAULT 1,
     log_start_stop_to_log   TINYINT(1) DEFAULT 1,
     cron_expression         VARCHAR(64) NOT NULL,
