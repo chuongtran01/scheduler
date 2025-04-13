@@ -42,7 +42,7 @@ In `application.yml`, configure your DB (e.g., H2, MySQL).
 ### 3. Run the application
 
 ```bash
-./mvnw spring-boot:run
+./gradlew spring-boot:run
 ```
 
 ---
