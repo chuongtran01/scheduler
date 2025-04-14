@@ -28,3 +28,6 @@ spring:
     change-log: "classpath:db.changelog-master.yaml"
     database-change-log-table: databasechangelog
     database-change-log-lock-table: databasechangeloglock
+
+scheduler:
+  pool-size: 1

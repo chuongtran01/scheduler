@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 @RestController
@@ -46,7 +45,7 @@ public class SchedulerController {
     }
 
     @GetMapping("/running")
-    public Map<String, Boolean> getRunningJobs() {
-        return schedulerManager.getJobStatuses();
+    public List<String> getRunningJobs() {
+        return schedulerManager.getRunningJobs();
     }
 }

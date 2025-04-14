@@ -1,6 +1,7 @@
 package com.scheduler.scheduler.service;
 
 import com.scheduler.scheduler.model.ScheduledJobDefinition;
+import com.scheduler.scheduler.properties.SchedulerProperties;
 import com.scheduler.scheduler.repository.ScheduledJobDefinitionRepository;
 import com.scheduler.scheduler.scheduled.RunnableJob;
 import jakarta.annotation.PostConstruct;
@@ -16,39 +17,40 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 public class SchedulerManagerServiceImpl implements SchedulerManager {
     private static final Logger logger = LoggerFactory.getLogger(SchedulerManagerServiceImpl.class);
-
     private final List<RunnableJob> availableJobs;
     private final TaskScheduler taskScheduler;
     private final ApplicationContext context;
-
     private final ScheduledJobDefinitionRepository scheduledJobDefinitionRepository;
-
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
-
     private final Map<String, Boolean> jobRunningStatus = new ConcurrentHashMap<>();
+    private final SchedulerProperties schedulerProperties;
+    private final Semaphore poolLimiter;
 
 
-    public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository) {
+    public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository, SchedulerProperties schedulerProperties) {
         this.taskScheduler = taskScheduler;
         this.context = context;
         this.availableJobs = availableJobs;
         this.scheduledJobDefinitionRepository = scheduledJobDefinitionRepository;
+        this.schedulerProperties = schedulerProperties;
+        this.poolLimiter = new Semaphore(schedulerProperties.getPoolSize());
     }
 
     @PostConstruct
-    @Override
     public void scheduleJobs() {
         Map<String, RunnableJob> classNameToBean = availableJobs.stream().collect(Collectors.toMap(job -> job.getClass().getSimpleName(), Function.identity()));
 
@@ -113,8 +115,16 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
             boolean logToDb = scheduledJob.getLogStartStopToDb();
             boolean logToLog = scheduledJob.getLogStartStopToLog();
 
-            if (Boolean.TRUE.equals(jobRunningStatus.get(jobName))) {
+            if (jobRunningStatus.putIfAbsent(jobName, true) != null) {
                 logger.info("Job {} is already running. Skipping...", jobName);
+                return;
+            }
+
+            // Acquire semaphore to limit concurrency
+            boolean acquired = poolLimiter.tryAcquire();
+            if (!acquired) {
+                logger.warn("Pool is full — deferring job {} for 5s", jobName);
+                taskScheduler.schedule(wrapWithStatus(scheduledJob, jobBean), Instant.now().plusSeconds(5));
                 return;
             }
 
@@ -133,10 +143,10 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
             } catch (Exception e) {
                 errorMessage = String.format("Error running job %s: %s", jobName, e.getMessage());
                 logger.error(errorMessage, e);
-                scheduledJob.setErrorMessage(errorMessage);
             } finally {
                 completedTime = Timestamp.valueOf(LocalDateTime.now());
-                jobRunningStatus.put(jobName, false);
+                jobRunningStatus.remove(jobName);
+                poolLimiter.release(); // release the permit
 
                 if (logToLog) {
                     logger.info(String.format("Finished job: %s at %s", jobName, completedTime));
@@ -154,8 +164,8 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
     }
 
     @Override
-    public Map<String, Boolean> getJobStatuses() {
-        return jobRunningStatus;
+    public List<String> getRunningJobs() {
+        return jobRunningStatus.keySet().stream().toList();
     }
 
     @Override
