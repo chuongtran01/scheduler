@@ -30,5 +30,5 @@ spring:
     database-change-log-lock-table: databasechangeloglock
 
 scheduler:
-  pool-size: 1
+  pool-size: 2
   max-retries: 3

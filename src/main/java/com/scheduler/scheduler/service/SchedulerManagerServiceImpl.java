@@ -17,14 +17,12 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
 
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.Semaphore;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -38,8 +36,6 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
     private final Map<String, Boolean> jobRunningStatus = new ConcurrentHashMap<>();
     private final SchedulerProperties schedulerProperties;
-    private final Semaphore poolLimiter;
-
 
     public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository, SchedulerProperties schedulerProperties) {
         this.taskScheduler = taskScheduler;
@@ -47,7 +43,6 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         this.availableJobs = availableJobs;
         this.scheduledJobDefinitionRepository = scheduledJobDefinitionRepository;
         this.schedulerProperties = schedulerProperties;
-        this.poolLimiter = new Semaphore(schedulerProperties.getPoolSize());
     }
 
     @PostConstruct
@@ -120,20 +115,6 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
                 return;
             }
 
-            // Acquire semaphore to limit concurrency
-            boolean acquired = poolLimiter.tryAcquire();
-            if (retryCount >= schedulerProperties.getMaxRetries()) {
-                logger.warn("Job {} exceeded max retries. Skipping retry.", jobName);
-                jobRunningStatus.remove(jobName);
-                return;
-            }
-
-            if (!acquired) {
-                logger.warn("Pool is full — deferring job {} for 5s", jobName);
-                taskScheduler.schedule(wrapWithStatus(scheduledJob, jobBean, retryCount + 1), Instant.now().plusSeconds(5));
-                return;
-            }
-
             Timestamp startTime = Timestamp.valueOf(LocalDateTime.now());
             Timestamp completedTime;
             String errorMessage = null;
@@ -150,7 +131,6 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
             } finally {
                 completedTime = Timestamp.valueOf(LocalDateTime.now());
                 jobRunningStatus.remove(jobName);
-                poolLimiter.release(); // release the permit
 
                 if (logToLog) {
                     logger.info(String.format("Finished job: %s at %s", jobName, completedTime));
