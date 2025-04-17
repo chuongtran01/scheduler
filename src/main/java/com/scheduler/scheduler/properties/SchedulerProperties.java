@@ -13,4 +13,5 @@ import org.springframework.stereotype.Component;
 @Component
 public class SchedulerProperties {
     private int poolSize;
+    private int maxRetries;
 }

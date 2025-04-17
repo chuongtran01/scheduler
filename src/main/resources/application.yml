@@ -31,3 +31,4 @@ spring:
 
 scheduler:
   pool-size: 1
+  max-retries: 3

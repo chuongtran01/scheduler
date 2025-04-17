@@ -65,7 +65,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
                 continue;
             }
 
-            Runnable task = this.wrapWithStatus(job, jobBean);
+            Runnable task = this.wrapWithStatus(job, jobBean, 0);
 
             CronTrigger trigger = new CronTrigger(job.getCronExpression());
 
@@ -98,7 +98,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         }
 
 
-        Runnable task = this.wrapWithStatus(scheduledJob, jobBean);
+        Runnable task = this.wrapWithStatus(scheduledJob, jobBean, 0);
 
         try {
             ScheduledFuture<?> future = taskScheduler.schedule(task, new CronTrigger(scheduledJob.getCronExpression()));
@@ -109,7 +109,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         }
     }
 
-    private Runnable wrapWithStatus(ScheduledJobDefinition scheduledJob, RunnableJob jobBean) {
+    private Runnable wrapWithStatus(ScheduledJobDefinition scheduledJob, RunnableJob jobBean, int retryCount) {
         return () -> {
             String jobName = scheduledJob.getJobName();
             boolean logToDb = scheduledJob.getLogStartStopToDb();
@@ -122,13 +122,17 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
 
             // Acquire semaphore to limit concurrency
             boolean acquired = poolLimiter.tryAcquire();
-            if (!acquired) {
-                logger.warn("Pool is full — deferring job {} for 5s", jobName);
-                taskScheduler.schedule(wrapWithStatus(scheduledJob, jobBean), Instant.now().plusSeconds(5));
+            if (retryCount >= schedulerProperties.getMaxRetries()) {
+                logger.warn("Job {} exceeded max retries. Skipping retry.", jobName);
+                jobRunningStatus.remove(jobName);
                 return;
             }
 
-            jobRunningStatus.put(jobName, true);
+            if (!acquired) {
+                logger.warn("Pool is full — deferring job {} for 5s", jobName);
+                taskScheduler.schedule(wrapWithStatus(scheduledJob, jobBean, retryCount + 1), Instant.now().plusSeconds(5));
+                return;
+            }
 
             Timestamp startTime = Timestamp.valueOf(LocalDateTime.now());
             Timestamp completedTime;
