@@ -1,7 +1,6 @@
 package com.scheduler.scheduler.service;
 
 import com.scheduler.scheduler.model.ScheduledJobDefinition;
-import com.scheduler.scheduler.properties.SchedulerProperties;
 import com.scheduler.scheduler.repository.ScheduledJobDefinitionRepository;
 import com.scheduler.scheduler.scheduled.RunnableJob;
 import jakarta.annotation.PostConstruct;
@@ -35,14 +34,12 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
     private final ScheduledJobDefinitionRepository scheduledJobDefinitionRepository;
     private final Map<String, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
     private final Map<String, Boolean> jobRunningStatus = new ConcurrentHashMap<>();
-    private final SchedulerProperties schedulerProperties;
 
-    public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository, SchedulerProperties schedulerProperties) {
+    public SchedulerManagerServiceImpl(List<RunnableJob> availableJobs, TaskScheduler taskScheduler, ApplicationContext context, ScheduledJobDefinitionRepository scheduledJobDefinitionRepository) {
         this.taskScheduler = taskScheduler;
         this.context = context;
         this.availableJobs = availableJobs;
         this.scheduledJobDefinitionRepository = scheduledJobDefinitionRepository;
-        this.schedulerProperties = schedulerProperties;
     }
 
     @PostConstruct
@@ -60,7 +57,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
                 continue;
             }
 
-            Runnable task = this.wrapWithStatus(job, jobBean, 0);
+            Runnable task = this.wrapWithStatus(job, jobBean);
 
             CronTrigger trigger = new CronTrigger(job.getCronExpression());
 
@@ -93,7 +90,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         }
 
 
-        Runnable task = this.wrapWithStatus(scheduledJob, jobBean, 0);
+        Runnable task = this.wrapWithStatus(scheduledJob, jobBean);
 
         try {
             ScheduledFuture<?> future = taskScheduler.schedule(task, new CronTrigger(scheduledJob.getCronExpression()));
@@ -104,7 +101,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
         }
     }
 
-    private Runnable wrapWithStatus(ScheduledJobDefinition scheduledJob, RunnableJob jobBean, int retryCount) {
+    private Runnable wrapWithStatus(ScheduledJobDefinition scheduledJob, RunnableJob jobBean) {
         return () -> {
             String jobName = scheduledJob.getJobName();
             boolean logToDb = scheduledJob.getLogStartStopToDb();
@@ -131,6 +128,7 @@ public class SchedulerManagerServiceImpl implements SchedulerManager {
             } finally {
                 completedTime = Timestamp.valueOf(LocalDateTime.now());
                 jobRunningStatus.remove(jobName);
+                logger.info("[{}] Removed job {} from running status at {}", Thread.currentThread().getName(), jobName, Timestamp.valueOf(LocalDateTime.now()));
 
                 if (logToLog) {
                     logger.info(String.format("Finished job: %s at %s", jobName, completedTime));
